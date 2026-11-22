@@ -245,8 +245,8 @@ var LAYOUTS=[
   {id:'m5b',name:'5枚 大+小',cells:[[0,0,2/3,2/3],[2/3,0,1/3,1/3],[2/3,1/3,1/3,1/3],[0,2/3,.5,1/3],[.5,2/3,.5,1/3]]}
 ];
 var FALLBACK={1:'l1',2:'c2',3:'b3',4:'g4'};
-var PRESETS={bag:['g4','c2'],wallet:['r2','r2']};
-var PRESET_HINT={auto:'',bag:'バッグ：写真を「角4枚 → 側面2枚」の順に入れると、角は2×2、側面は左右2分割になります。残りの写真は下で選んだレイアウトで並べます。',wallet:'財布：写真を「横サイド2枚 → 頭とおしり2枚」の順に入れると、どちらも上下2分割になります。残りの写真は下で選んだレイアウトで並べます。'};
+var PRESETS={bag:['c2','g4'],wallet:['r2','r2']};
+var PRESET_HINT={auto:'',bag:'バッグ：写真を「側面2枚 → 角4枚」の順に入れると、側面は左右2分割、角は2×2になります。残りの写真は下で選んだレイアウトで並べます。',wallet:'財布：写真を「横サイド2枚 → 頭とおしり2枚」の順に入れると、どちらも上下2分割になります。残りの写真は下で選んだレイアウトで並べます。'};
 var ASPECTS={'1:1':[1,1],'3:4':[3,4],'4:3':[4,3]};
 var MAXSIDE=2000;
 var layoutById=function(id){return LAYOUTS.filter(function(l){return l.id===id;})[0];};
@@ -269,12 +269,18 @@ function getRects(layoutId,W,H){
   });
 }
 function geom(r,p,sl){
-  var s=sl.fit==='contain'?Math.min(r.w/p.w,r.h/p.h):Math.max(r.w/p.w,r.h/p.h)*sl.zoom;
-  var dw=p.w*s,dh=p.h*s,ex=dw-r.w,ey=dh-r.h;
-  return {dx:r.x+(ex>0?-ex*sl.fx:-ex/2),dy:r.y+(ey>0?-ey*sl.fy:-ey/2),dw:dw,dh:dh,ex:ex,ey:ey};
+  var th=((sl.q||0)*90+(sl.fine||0))*Math.PI/180,c=Math.abs(Math.cos(th)),sn=Math.abs(Math.sin(th)),s,ex=0,ey=0;
+  if(sl.fit==='contain'){
+    s=Math.min(r.w/(p.w*c+p.h*sn),r.h/(p.w*sn+p.h*c));
+  }else{
+    var bw=r.w*c+r.h*sn,bh=r.w*sn+r.h*c;
+    s=Math.max(bw/p.w,bh/p.h)*sl.zoom;ex=p.w*s-bw;ey=p.h*s-bh;
+  }
+  var ox=ex*(.5-sl.fx),oy=ey*(.5-sl.fy),co=Math.cos(th),si=Math.sin(th);
+  return {cx:r.x+r.w/2+ox*co-oy*si,cy:r.y+r.h/2+ox*si+oy*co,dw:p.w*s,dh:p.h*s,th:th,ex:ex,ey:ey};
 }
 function photoById(id){for(var i=0;i<S.photos.length;i++){if(S.photos[i].id===id)return S.photos[i];}return null;}
-function mkSlot(pid){return {pid:pid,fit:S.fit,zoom:1,fx:.5,fy:.5};}
+function mkSlot(pid){return {pid:pid,fit:S.fit,zoom:1,fx:.5,fy:.5,q:0,fine:0};}
 
 /* ---------- drawing ---------- */
 function drawSheet(ctx,W,H,c,o){
@@ -287,7 +293,7 @@ function drawSheet(ctx,W,H,c,o){
     if(p){
       var g=geom(r,p,sl);
       ctx.save();ctx.beginPath();ctx.rect(r.x,r.y,r.w,r.h);ctx.clip();
-      ctx.drawImage(p.img,g.dx,g.dy,g.dw,g.dh);
+      ctx.translate(g.cx,g.cy);ctx.rotate(g.th);ctx.drawImage(p.img,-g.dw/2,-g.dh/2,g.dw,g.dh);
       ctx.restore();
     }else if(o.preview){
       ctx.fillStyle='rgba(128,128,128,.22)';ctx.fillRect(r.x,r.y,r.w,r.h);
@@ -412,6 +418,7 @@ function sheetHTML(c,ci){
     '<div class="cellbar" hidden><p class="cb-t mono"></p>'+
       '<div class="cb-row"><div class="seg" role="group" aria-label="この枠の写真の入れ方"><button type="button" data-act="fit-cover">切り抜き</button><button type="button" data-act="fit-contain">全体</button></div>'+
       '<label class="zoom">ズーム<input type="range" min="100" max="300" step="5" data-act="zoom"><output class="mono"></output></label></div>'+
+      '<div class="cb-row"><button type="button" class="btn" data-act="rotl">⟲ 左に90°</button><button type="button" class="btn" data-act="rotr">⟳ 右に90°</button><label class="zoom">傾き<input type="range" min="-45" max="45" step="0.5" data-act="fine"><output class="mono"></output></label></div>'+
       '<div class="cb-row"><button type="button" class="btn" data-act="swap">他の枠と入れ替え</button><button type="button" class="btn" data-act="reset">位置を戻す</button><button type="button" class="btn" data-act="clearcell">この枠を空にする</button></div>'+
       '<p class="hint" style="margin:0">選んだ枠の中をドラッグすると、見える位置が動きます。</p></div>'+
     '<div class="sheet-f"><span class="mono f-size"></span><div class="bar-b"><button type="button" class="btn primary" data-act="hold">長押しで保存</button><button type="button" class="btn" data-act="save">ファイルで保存</button></div></div>';
@@ -453,7 +460,10 @@ function syncBars(){
     bar.querySelector('[data-act="fit-cover"]').setAttribute('aria-pressed',sl&&cover?'true':'false');
     bar.querySelector('[data-act="fit-contain"]').setAttribute('aria-pressed',sl&&!cover?'true':'false');
     var z=bar.querySelector('[data-act="zoom"]');z.value=sl?Math.round(sl.zoom*100):100;z.disabled=!sl||!cover;
-    bar.querySelector('output').textContent=(sl?Math.round(sl.zoom*100):100)+'%';
+    z.parentElement.querySelector('output').textContent=(sl?Math.round(sl.zoom*100):100)+'%';
+    var fn=bar.querySelector('[data-act="fine"]');fn.value=sl?(sl.fine||0):0;fn.disabled=!sl;
+    fn.parentElement.querySelector('output').textContent=(sl?(sl.fine||0):0)+'°';
+    bar.querySelectorAll('[data-act="rotl"],[data-act="rotr"]').forEach(function(b){b.disabled=!sl;});
     var sw=bar.querySelector('[data-act="swap"]');sw.setAttribute('aria-pressed',S.swap?'true':'false');
     sw.textContent=S.swap?'入れ替え先をタップ':'他の枠と入れ替え';sw.disabled=!sl;
     bar.querySelector('[data-act="reset"]').disabled=!sl;
@@ -552,8 +562,9 @@ function bindCanvas(cv,ci){
       var sl=S.collages[ci].slots[st.si],ph=sl&&photoById(sl.pid);
       if(ph&&sl.fit==='cover'){
         var r=getRects(S.collages[ci].layout,cv.width,cv.height)[st.si],g=geom(r,ph,sl);
-        if(g.ex>0)sl.fx=Math.min(1,Math.max(0,sl.fx-(p.x-st.lx)/g.ex));
-        if(g.ey>0)sl.fy=Math.min(1,Math.max(0,sl.fy-(p.y-st.ly)/g.ey));
+        var cs=Math.cos(g.th),sn=Math.sin(g.th),mx=p.x-st.lx,my=p.y-st.ly,ux=mx*cs+my*sn,uy=-mx*sn+my*cs;
+        if(g.ex>0)sl.fx=Math.min(1,Math.max(0,sl.fx-ux/g.ex));
+        if(g.ey>0)sl.fy=Math.min(1,Math.max(0,sl.fy-uy/g.ey));
         drawAt(ci);
       }
       st.lx=p.x;st.ly=p.y;
@@ -856,11 +867,17 @@ sheetsEl.addEventListener('click',function(e){
   }
   if(!sl&&act!=='swap')return;
   if(act==='fit-cover'||act==='fit-contain'){sl.fit=act==='fit-cover'?'cover':'contain';sl.zoom=1;sl.fx=.5;sl.fy=.5;drawAt(ci);syncBars();}
-  else if(act==='reset'){sl.zoom=1;sl.fx=.5;sl.fy=.5;drawAt(ci);syncBars();}
+  else if(act==='reset'){sl.zoom=1;sl.fx=.5;sl.fy=.5;sl.q=0;sl.fine=0;drawAt(ci);syncBars();}
+  else if(act==='rotl'||act==='rotr'){sl.q=((sl.q||0)+(act==='rotr'?1:3))%4;sl.fx=.5;sl.fy=.5;drawAt(ci);syncBars();}
   else if(act==='swap'){if(slotAt(S.sel)){S.swap=!S.swap;syncBars();renderTray();}}
   else if(act==='clearcell'){S.collages[ci].slots[S.sel.si]=null;S.swap=false;drawAt(ci);refreshMeta();syncBars();renderTray();updateStatus();}
 });
 sheetsEl.addEventListener('input',function(e){
+  var f=e.target.closest('[data-act="fine"]');
+  if(f){
+    var cj=Number(f.closest('.sheet').dataset.i),sj=S.sel&&S.sel.ci===cj?slotAt(S.sel):null;if(!sj)return;
+    sj.fine=Number(f.value);sj.fx=.5;sj.fy=.5;f.parentElement.querySelector('output').textContent=sj.fine+'°';drawAt(cj);return;
+  }
   var z=e.target.closest('[data-act="zoom"]');if(!z)return;
   var ci=Number(z.closest('.sheet').dataset.i),sl=S.sel&&S.sel.ci===ci?slotAt(S.sel):null;if(!sl)return;
   sl.zoom=Number(z.value)/100;z.parentElement.querySelector('output').textContent=z.value+'%';drawAt(ci);
@@ -906,7 +923,7 @@ function persistNow(){
       v:1,preset:S.preset,chosen:S.chosen,aspect:S.aspect,size:S.size,gap:S.gap,margin:S.margin,bg:S.bg,fit:S.fit,smart:S.smart,nid:S.nid,cid:S.cid,
       photos:S.photos.map(function(p){return {id:p.id,name:p.name};}),
       collages:S.collages.map(function(c){
-        return {id:c.id,layout:c.layout,slots:c.slots.map(function(s){return s?{pid:s.pid,fit:s.fit,zoom:s.zoom,fx:s.fx,fy:s.fy}:null;})};
+        return {id:c.id,layout:c.layout,slots:c.slots.map(function(s){return s?{pid:s.pid,fit:s.fit,zoom:s.zoom,fx:s.fx,fy:s.fy,q:s.q||0,fine:s.fine||0}:null;})};
       })
     },'state');
   }catch(_){}
@@ -932,7 +949,7 @@ async function restore(){
     var n=layoutById(c.layout).cells.length,slots=[];
     for(var k=0;k<n;k++){
       var s=c.slots&&c.slots[k];
-      slots.push(s&&have[s.pid]?{pid:s.pid,fit:s.fit==='contain'?'contain':'cover',zoom:Number(s.zoom)||1,fx:isNaN(s.fx)?.5:s.fx,fy:isNaN(s.fy)?.5:s.fy}:null);
+      slots.push(s&&have[s.pid]?{pid:s.pid,fit:s.fit==='contain'?'contain':'cover',zoom:Number(s.zoom)||1,fx:isNaN(s.fx)?.5:s.fx,fy:isNaN(s.fy)?.5:s.fy,q:Number(s.q)||0,fine:Number(s.fine)||0}:null);
     }
     return {id:c.id,layout:c.layout,slots:slots};
   });
