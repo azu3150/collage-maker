@@ -96,7 +96,14 @@ input[type=color]{width:32px;height:32px;padding:0;border:2px solid var(--line);
 .sheet-h h3{margin:0;font-size:14px;font-weight:700}
 .sheet-h .meta{font-size:12px;color:var(--ink-2)}
 .sheet-h select{margin-left:auto}
-.stage{background:var(--stage);padding:12px}
+.stage{background:var(--stage);padding:12px;position:relative}
+.hl{position:absolute;inset:12px;pointer-events:none}
+.hd{position:absolute;width:40px;height:40px;transform:translate(-50%,-50%);display:grid;place-items:center;pointer-events:auto;touch-action:none;cursor:col-resize;-webkit-tap-highlight-color:transparent}
+.hd.r{cursor:row-resize}
+.hd i{display:block;background:#fff;border:2px solid #1b1b1b;border-radius:99px;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.hd.c i{width:12px;height:34px}.hd.r i{width:34px;height:12px}
+.lay-h{grid-column:1/-1;margin:8px 0 0;font:500 12px/1.2 var(--font-mono);letter-spacing:.06em;color:var(--ink-2)}
+.lay-h:first-child{margin-top:0}
 .stage canvas{display:block;width:100%;height:auto;max-width:100%;touch-action:pan-y;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.25)}
 .sheet.has-sel canvas{touch-action:none;cursor:grab}
 .cellbar{padding:12px;border-top:1px solid var(--line);display:grid;gap:10px;background:var(--panel-2)}
@@ -197,6 +204,7 @@ img{max-width:100%}[hidden]{display:none!important}
           <button type="button" data-v="contain">全体を収める</button>
         </div>
       </div>
+      <label class="check"><input type="checkbox" id="handles">枠の境目に、大きさを変えるつまみを表示する（ドラッグで動かす）</label>
       <label class="check"><input type="checkbox" id="smart">写真の向きに合わせて、枠の並びを自動で入れ替える</label>
       <button type="button" id="btnRebuild" class="btn rebuild">この設定で並べ直す</button>
     </div>
@@ -230,28 +238,68 @@ img{max-width:100%}[hidden]{display:none!important}
 var $=function(s){return document.querySelector(s);};
 var pad=function(n){return String(n).padStart(2,'0');};
 
-var LAYOUTS=[
-  {id:'l1',name:'1枚',cells:[[0,0,1,1]]},
-  {id:'c2',name:'2枚 左右',cells:[[0,0,.5,1],[.5,0,.5,1]]},
-  {id:'r2',name:'2枚 上下',cells:[[0,0,1,.5],[0,.5,1,.5]]},
-  {id:'c3',name:'3枚 左右',cells:[[0,0,1/3,1],[1/3,0,1/3,1],[2/3,0,1/3,1]]},
-  {id:'r3',name:'3枚 上下',cells:[[0,0,1,1/3],[0,1/3,1,1/3],[0,2/3,1,1/3]]},
-  {id:'b3',name:'3枚 大+小',cells:[[0,0,.5,1],[.5,0,.5,.5],[.5,.5,.5,.5]]},
-  {id:'t3a',name:'3枚 上1下2',cells:[[0,0,1,.5],[0,.5,.5,.5],[.5,.5,.5,.5]]},
-  {id:'t3b',name:'3枚 上2下1',cells:[[0,0,.5,.5],[.5,0,.5,.5],[0,.5,1,.5]]},
-  {id:'g4',name:'4枚 2×2',cells:[[0,0,.5,.5],[.5,0,.5,.5],[0,.5,.5,.5],[.5,.5,.5,.5]]},
-  {id:'m5a',name:'5枚 上2下3',cells:[[0,0,.5,.5],[.5,0,.5,.5],[0,.5,1/3,.5],[1/3,.5,1/3,.5],[2/3,.5,1/3,.5]]},
-  {id:'m5c',name:'5枚 左2+右3',cells:[[0,0,.5,.5],[0,.5,.5,.5],[.5,0,.5,1/3],[.5,1/3,.5,1/3],[.5,2/3,.5,1/3]]},
-  {id:'m5b',name:'5枚 大+小',cells:[[0,0,2/3,2/3],[2/3,0,1/3,1/3],[2/3,1/3,1/3,1/3],[0,2/3,.5,1/3],[.5,2/3,.5,1/3]]}
+var X='x';
+function C(id,k,w){return {d:'c',id:id,k:k,w:w||k.map(function(){return 1;})};}
+function R(id,k,w){return {d:'r',id:id,k:k,w:w||k.map(function(){return 1;})};}
+function nodeW(node,ws){var w=ws&&ws[node.id];return (w&&w.length===node.k.length)?w:node.w;}
+function sum(a){return a.reduce(function(t,v){return t+v;},0);}
+function layoutCells(node,ws,x,y,w,h,out){
+  if(node===X){out.push([x,y,w,h]);return out;}
+  var wt=nodeW(node,ws),T=sum(wt),pos=0;
+  node.k.forEach(function(ch,i){
+    var f=wt[i]/T;
+    if(node.d==='c')layoutCells(ch,ws,x+pos*w,y,f*w,h,out);else layoutCells(ch,ws,x,y+pos*h,w,f*h,out);
+    pos+=f;
+  });
+  return out;
+}
+function layoutDividers(node,ws,ux,uy,uw,uh,out){
+  if(node===X)return out;
+  var wt=nodeW(node,ws),T=sum(wt),pos=0;
+  node.k.forEach(function(ch,i){
+    var f=wt[i]/T;
+    if(i>0)out.push({node:node,i:i-1,d:node.d,ux:ux,uy:uy,uw:uw,uh:uh,cum:pos});
+    if(node.d==='c')layoutDividers(ch,ws,ux+pos*uw,uy,f*uw,uh,out);else layoutDividers(ch,ws,ux,uy+pos*uh,uw,f*uh,out);
+    pos+=f;
+  });
+  return out;
+}
+var LAYOUT_DEFS=[
+  ['l1','1枚',X],
+  ['c2','2枚 左右',C('a',[X,X])],
+  ['r2','2枚 上下',R('a',[X,X])],
+  ['c3','3枚 左右',C('a',[X,X,X])],
+  ['r3','3枚 上下',R('a',[X,X,X])],
+  ['b3','3枚 左1右2',C('a',[X,R('b',[X,X])])],
+  ['b3r','3枚 左2右1',C('a',[R('b',[X,X]),X])],
+  ['t3a','3枚 上1下2',R('a',[X,C('b',[X,X])])],
+  ['t3b','3枚 上2下1',R('a',[C('b',[X,X]),X])],
+  ['g4','4枚 2×2',R('a',[C('b',[X,X]),C('b',[X,X])])],
+  ['l1r3','4枚 左1右3',C('a',[X,R('b',[X,X,X])])],
+  ['l3r1','4枚 左3右1',C('a',[R('b',[X,X,X]),X])],
+  ['t1b3','4枚 上1下3',R('a',[X,C('b',[X,X,X])])],
+  ['t3b1','4枚 上3下1',R('a',[C('b',[X,X,X]),X])],
+  ['m5a','5枚 上2下3',R('a',[C('b',[X,X]),C('c',[X,X,X])])],
+  ['m5d','5枚 上3下2',R('a',[C('b',[X,X,X]),C('c',[X,X])])],
+  ['m5c','5枚 左2右3',C('a',[R('b',[X,X]),R('c',[X,X,X])])],
+  ['m5e','5枚 左3右2',C('a',[R('b',[X,X,X]),R('c',[X,X])])],
+  ['m5b','5枚 大+小',R('a',[C('b',[X,R('c',[X,X])],[2,1]),C('d',[X,X])],[2,1])],
+  ['g6a','6枚 2行×3列',R('a',[C('b',[X,X,X]),C('b',[X,X,X])])],
+  ['g6b','6枚 3行×2列',C('a',[R('b',[X,X,X]),R('b',[X,X,X])])],
+  ['u2d4','6枚 上2下4',R('a',[C('b',[X,X]),C('c',[X,X,X,X])])],
+  ['u4d2','6枚 上4下2',R('a',[C('b',[X,X,X,X]),C('c',[X,X])])],
+  ['l2r4','6枚 左2右4',C('a',[R('b',[X,X]),R('c',[X,X,X,X])])],
+  ['l4r2','6枚 左4右2',C('a',[R('b',[X,X,X,X]),R('c',[X,X])])]
 ];
-var FALLBACK={1:'l1',2:'c2',3:'b3',4:'g4'};
+var LAYOUTS=LAYOUT_DEFS.map(function(d){return {id:d[0],name:d[1],tree:d[2],cells:layoutCells(d[2],null,0,0,1,1,[])};});
+var FALLBACK={1:'l1',2:'c2',3:'b3',4:'g4',5:'m5a'};
 var PRESETS={bag:['c2','g4'],wallet:['r2','r2']};
 var PRESET_HINT={auto:'',bag:'バッグ：写真を「側面2枚 → 角4枚」の順に入れると、側面は左右2分割、角は2×2になります。残りの写真は下で選んだレイアウトで並べます。',wallet:'財布：写真を「横サイド2枚 → 頭とおしり2枚」の順に入れると、どちらも上下2分割になります。残りの写真は下で選んだレイアウトで並べます。'};
 var ASPECTS={'1:1':[1,1],'3:4':[3,4],'4:3':[4,3]};
 var MAXSIDE=2000;
 var layoutById=function(id){return LAYOUTS.filter(function(l){return l.id===id;})[0];};
 
-var S={photos:[],collages:[],chosen:['g4'],preset:'bag',aspect:'1:1',size:1500,gap:0.6,margin:0.6,bg:'#FFFFFF',fit:'cover',smart:true,sel:null,swap:false,nid:1,cid:1,busy:false,loading:false};
+var S={photos:[],collages:[],chosen:['g4'],preset:'bag',handles:true,aspect:'1:1',size:1500,gap:0.6,margin:0.6,bg:'#FFFFFF',fit:'cover',smart:true,sel:null,swap:false,nid:1,cid:1,busy:false,loading:false};
 
 var trayEl=$('#tray'),sheetsEl=$('#sheets'),laysEl=$('#lays'),statusEl=$('#status'),fileEl=$('#file');
 var statusTimer=0;
@@ -261,11 +309,14 @@ function dims(){
   var a=ASPECTS[S.aspect],L=S.size;
   return a[0]>=a[1]?{W:L,H:Math.round(L*a[1]/a[0])}:{W:Math.round(L*a[0]/a[1]),H:L};
 }
-function getRects(layoutId,W,H){
-  var L=layoutById(layoutId),Ld=Math.max(W,H),g=S.gap/100*Ld,m=S.margin/100*Ld;
-  var fx=m-g/2,fy=m-g/2,fw=W-2*fx,fh=H-2*fy;
-  return L.cells.map(function(c){
-    return {x:fx+c[0]*fw+g/2,y:fy+c[1]*fh+g/2,w:Math.max(1,c[2]*fw-g),h:Math.max(1,c[3]*fh-g)};
+function frame(W,H){
+  var Ld=Math.max(W,H),g=S.gap/100*Ld,m=S.margin/100*Ld,fx=m-g/2,fy=m-g/2;
+  return {g:g,fx:fx,fy:fy,fw:W-2*fx,fh:H-2*fy};
+}
+function getRects(layoutId,W,H,ws){
+  var L=layoutById(layoutId),f=frame(W,H);
+  return layoutCells(L.tree,ws,0,0,1,1,[]).map(function(c){
+    return {x:f.fx+c[0]*f.fw+f.g/2,y:f.fy+c[1]*f.fh+f.g/2,w:Math.max(1,c[2]*f.fw-f.g),h:Math.max(1,c[3]*f.fh-f.g)};
   });
 }
 function geom(r,p,sl){
@@ -287,7 +338,7 @@ function drawSheet(ctx,W,H,c,o){
   o=o||{};
   ctx.fillStyle=S.bg;ctx.fillRect(0,0,W,H);
   ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
-  var rs=getRects(c.layout,W,H);
+  var rs=getRects(c.layout,W,H,c.ws);
   c.slots.forEach(function(sl,i){
     var r=rs[i],p=sl&&photoById(sl.pid);
     if(p){
@@ -320,7 +371,46 @@ function drawAt(ci){
   drawSheet(cv.getContext('2d'),pw,ph,c,{preview:true,selIdx:(S.sel&&S.sel.ci===ci)?S.sel.si:null});
   persistSoon();
 }
-function drawAll(){S.collages.forEach(function(_,i){drawAt(i);});}
+function placeHandles(ci){
+  var el=sheetEl(ci),c=S.collages[ci];if(!el||!c)return;
+  var layer=el.querySelector('.hl');if(!layer)return;
+  layer.hidden=!S.handles;if(!S.handles)return;
+  var d=dims(),f=frame(d.W,d.H),list=layoutDividers(layoutById(c.layout).tree,c.ws,0,0,1,1,[]);
+  if(layer.children.length!==list.length){
+    layer.innerHTML=list.map(function(dv,k){return '<div class="hd '+dv.d+'" data-k="'+k+'" role="separator" aria-label="境目をドラッグして枠の大きさを変える"><i></i></div>';}).join('');
+  }
+  list.forEach(function(dv,k){
+    var u=dv.d==='c'?dv.ux+dv.cum*dv.uw:dv.ux+dv.uw/2,v=dv.d==='c'?dv.uy+dv.uh/2:dv.uy+dv.cum*dv.uh;
+    var h=layer.children[k];
+    h.style.left=((f.fx+u*f.fw)/d.W*100)+'%';h.style.top=((f.fy+v*f.fh)/d.H*100)+'%';
+  });
+}
+function drawAll(){S.collages.forEach(function(_,i){drawAt(i);placeHandles(i);});}
+(function(){
+  var drag=null;
+  sheetsEl.addEventListener('pointerdown',function(e){
+    var h=e.target.closest('.hd');if(!h)return;
+    var sh=h.closest('.sheet'),ci=Number(sh.dataset.i),c=S.collages[ci];if(!c)return;
+    var d=dims(),f=frame(d.W,d.H),cv=sh.querySelector('canvas');
+    var list=layoutDividers(layoutById(c.layout).tree,c.ws,0,0,1,1,[]),dv=list[Number(h.dataset.k)];if(!dv)return;
+    var k=cv.clientWidth/d.W,ext=(dv.d==='c'?dv.uw*f.fw:dv.uh*f.fh)*k;
+    drag={ci:ci,node:dv.node,i:dv.i,axis:dv.d,ext:ext,x0:e.clientX,y0:e.clientY,start:nodeW(dv.node,c.ws).slice()};
+    try{h.setPointerCapture(e.pointerId);}catch(_){}
+    e.preventDefault();
+  });
+  sheetsEl.addEventListener('pointermove',function(e){
+    if(!drag)return;
+    var c=S.collages[drag.ci];if(!c){drag=null;return;}
+    var T=sum(drag.start),dpx=drag.axis==='c'?e.clientX-drag.x0:e.clientY-drag.y0,df=dpx/drag.ext*T;
+    var a=drag.start[drag.i],b=drag.start[drag.i+1],mn=0.1*T,na=Math.min(a+b-mn,Math.max(mn,a+df));
+    var arr=drag.start.slice();arr[drag.i]=na;arr[drag.i+1]=a+b-na;
+    c.ws=c.ws||{};c.ws[drag.node.id]=arr;
+    drawAt(drag.ci);placeHandles(drag.ci);
+  });
+  function endDrag(){drag=null;}
+  sheetsEl.addEventListener('pointerup',endDrag);
+  sheetsEl.addEventListener('pointercancel',endDrag);
+})();
 
 /* ---------- auto layout ---------- */
 function permute(arr,cb,k){
@@ -356,7 +446,7 @@ function autoBuild(ids,startIdx){
       lay=hit||FALLBACK[remain];n=remain;
     }
     var group=ids.slice(i,i+n);
-    out.push({id:S.cid++,layout:lay,slots:assignGroup(group,lay,isPre)});
+    out.push({id:S.cid++,layout:lay,ws:{},slots:assignGroup(group,lay,isPre)});
     i+=n;if(!isPre)k++;
   }
   return out;
@@ -383,10 +473,15 @@ function icon(L){
 }
 function renderChips(){
   laysEl.innerHTML='';
+  var last=-1;
   LAYOUTS.forEach(function(L){
+    var n=L.cells.length;
+    if(n!==last){
+      last=n;var h=document.createElement('p');h.className='lay-h';h.textContent=n===1?'分割なし':n+'分割';laysEl.appendChild(h);
+    }
     var idx=S.chosen.indexOf(L.id),b=document.createElement('button');
     b.type='button';b.className='lay';b.dataset.id=L.id;b.setAttribute('aria-pressed',idx>=0?'true':'false');
-    b.innerHTML=icon(L)+'<span>'+L.name+'</span>'+(idx>=0&&S.chosen.length>1?'<i class="ord">'+(idx+1)+'</i>':'');
+    b.innerHTML=icon(L)+'<span>'+(L.name.replace(/^\d枚 ?/,'')||L.name)+'</span>'+(idx>=0&&S.chosen.length>1?'<i class="ord">'+(idx+1)+'</i>':'');
     laysEl.appendChild(b);
   });
 }
@@ -414,7 +509,7 @@ function sheetHTML(c,ci){
     '<select data-act="layout" aria-label="コラージュ '+(ci+1)+' のレイアウト">'+opts+'</select>'+
     '<button type="button" class="btn" data-act="resetsheet" aria-label="コラージュ '+(ci+1)+' をリセット">リセット</button>'+
     '<button type="button" class="btn" data-act="del" aria-label="コラージュ '+(ci+1)+' を削除">削除</button></div>'+
-    '<div class="stage"><canvas role="img" aria-label="コラージュ '+(ci+1)+' のプレビュー"></canvas></div>'+
+    '<div class="stage"><canvas role="img" aria-label="コラージュ '+(ci+1)+' のプレビュー"></canvas><div class="hl"></div></div>'+
     '<div class="cellbar" hidden><p class="cb-t mono"></p>'+
       '<div class="cb-row"><div class="seg" role="group" aria-label="この枠の写真の入れ方"><button type="button" data-act="fit-cover">切り抜き</button><button type="button" data-act="fit-contain">全体</button></div>'+
       '<label class="zoom">ズーム<input type="range" min="100" max="300" step="5" data-act="zoom"><output class="mono"></output></label></div>'+
@@ -502,6 +597,7 @@ function syncControls(){
   $('#margin').value=S.margin;$('#marginOut').textContent=S.margin.toFixed(1)+'%';
   $('#bgCustom').value=/^#[0-9a-f]{6}$/i.test(S.bg)?S.bg:'#FFFFFF';
   $('#smart').checked=S.smart;
+  $('#handles').checked=S.handles;
   document.querySelectorAll('#segPreset button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.v===S.preset?'true':'false');});
   var ph=$('#presetHint');ph.textContent=PRESET_HINT[S.preset]||'';ph.hidden=!PRESET_HINT[S.preset];
 }
@@ -542,7 +638,7 @@ function assignPhoto(pid){
 }
 function pt(cv,e){var r=cv.getBoundingClientRect();return {x:(e.clientX-r.left)*cv.width/r.width,y:(e.clientY-r.top)*cv.height/r.height};}
 function hit(ci,cv,x,y){
-  var rs=getRects(S.collages[ci].layout,cv.width,cv.height);
+  var rs=getRects(S.collages[ci].layout,cv.width,cv.height,S.collages[ci].ws);
   for(var i=0;i<rs.length;i++){var r=rs[i];if(x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h)return i;}
   return null;
 }
@@ -561,7 +657,7 @@ function bindCanvas(cv,ci){
     if(st.moved&&st.pan){
       var sl=S.collages[ci].slots[st.si],ph=sl&&photoById(sl.pid);
       if(ph&&sl.fit==='cover'){
-        var r=getRects(S.collages[ci].layout,cv.width,cv.height)[st.si],g=geom(r,ph,sl);
+        var r=getRects(S.collages[ci].layout,cv.width,cv.height,S.collages[ci].ws)[st.si],g=geom(r,ph,sl);
         var cs=Math.cos(g.th),sn=Math.sin(g.th),mx=p.x-st.lx,my=p.y-st.ly,ux=mx*cs+my*sn,uy=-mx*sn+my*cs;
         if(g.ex>0)sl.fx=Math.min(1,Math.max(0,sl.fx-ux/g.ex));
         if(g.ey>0)sl.fy=Math.min(1,Math.max(0,sl.fy-uy/g.ey));
@@ -752,7 +848,7 @@ function resetData(c){
   var n=layoutById(c.layout).cells.length,ids=c.slots.filter(Boolean).map(function(s){return s.pid;});
   var slots=assignGroup(ids,c.layout);
   while(slots.length<n)slots.push(null);
-  c.slots=slots;
+  c.slots=slots;c.ws={};
 }
 function resetCollage(ci){
   var c=S.collages[ci];if(!c)return;
@@ -843,6 +939,7 @@ $('#segFit').addEventListener('click',function(e){
   S.collages.forEach(function(c){c.slots.forEach(function(sl){if(sl){sl.fit=S.fit;sl.zoom=1;sl.fx=.5;sl.fy=.5;}});});
   syncControls();syncBars();drawAll();
 });
+$('#handles').addEventListener('change',function(e){S.handles=e.target.checked;drawAll();});
 $('#smart').addEventListener('change',function(e){S.smart=e.target.checked;rebuildAll();});
 $('#btnRebuild').addEventListener('click',rebuildAll);
 $('#btnMore').addEventListener('click',function(){
@@ -885,7 +982,7 @@ sheetsEl.addEventListener('input',function(e){
 sheetsEl.addEventListener('change',function(e){
   var s=e.target.closest('[data-act="layout"]');if(!s)return;
   var ci=Number(s.closest('.sheet').dataset.i),c=S.collages[ci],n=layoutById(s.value).cells.length;
-  c.layout=s.value;
+  c.layout=s.value;c.ws={};
   var slots=c.slots.slice(0,n);while(slots.length<n)slots.push(null);c.slots=slots;
   S.sel=null;S.swap=false;
   renderAll();
@@ -923,7 +1020,7 @@ function persistNow(){
       v:1,preset:S.preset,chosen:S.chosen,aspect:S.aspect,size:S.size,gap:S.gap,margin:S.margin,bg:S.bg,fit:S.fit,smart:S.smart,nid:S.nid,cid:S.cid,
       photos:S.photos.map(function(p){return {id:p.id,name:p.name};}),
       collages:S.collages.map(function(c){
-        return {id:c.id,layout:c.layout,slots:c.slots.map(function(s){return s?{pid:s.pid,fit:s.fit,zoom:s.zoom,fx:s.fx,fy:s.fy,q:s.q||0,fine:s.fine||0}:null;})};
+        return {id:c.id,layout:c.layout,ws:c.ws||{},slots:c.slots.map(function(s){return s?{pid:s.pid,fit:s.fit,zoom:s.zoom,fx:s.fx,fy:s.fy,q:s.q||0,fine:s.fine||0}:null;})};
       })
     },'state');
   }catch(_){}
@@ -951,7 +1048,9 @@ async function restore(){
       var s=c.slots&&c.slots[k];
       slots.push(s&&have[s.pid]?{pid:s.pid,fit:s.fit==='contain'?'contain':'cover',zoom:Number(s.zoom)||1,fx:isNaN(s.fx)?.5:s.fx,fy:isNaN(s.fy)?.5:s.fy,q:Number(s.q)||0,fine:Number(s.fine)||0}:null);
     }
-    return {id:c.id,layout:c.layout,slots:slots};
+    var ws={};
+    Object.keys(c.ws||{}).forEach(function(k){var a=c.ws[k];if(Array.isArray(a)&&a.every(function(v){return typeof v==='number'&&v>0;}))ws[k]=a;});
+    return {id:c.id,layout:c.layout,ws:ws,slots:slots};
   });
   S.sel=null;S.swap=false;
   return true;
